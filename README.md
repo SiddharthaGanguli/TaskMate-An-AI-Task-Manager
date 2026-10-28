@@ -10,6 +10,8 @@ You: Add a task to finish my AI project by Friday, high priority, and show my pe
 
 The agent calls `add_task()`, receives the saved task, calls `list_tasks()`, and explains the result. It can ask a follow-up question when a request is unclear.
 
+TaskMate also supports duplicate detection, categories, daily planning, undo, title search, and CSV or JSON exports. These work with OpenAI and local models. The local commands and command-line options below can run without making a model request.
+
 ## Set up
 
 You need Python 3.11 or newer. Choose OpenAI with an API key, or run a downloaded model locally with Ollama. A ChatGPT subscription does not provide this app with an API key.
@@ -115,6 +117,113 @@ You can read tasks without an API key:
 
 After installation, `task-agent` is also available inside the virtual environment.
 
+## Duplicate detection
+
+Adding the same pending task again returns its existing ID instead of saving a second copy. TaskMate compares the title, deadline, and category. Titles ignore letter case and repeated whitespace. Categories also ignore case and extra whitespace.
+
+For example, `Study  algebra` and `study algebra` match when their deadline and category match. The existing priority stays unchanged, even if the repeated request asks for a different priority. Use an update to change it. Different deadlines or categories are separate tasks, and a completed task does not block a new pending task.
+
+The check and save share one database transaction, including when two requests arrive together. Updating a pending task into a duplicate is rejected. Similar meanings with different wording are not automatically merged. Existing duplicates from an older version are preserved.
+
+## Categories
+
+Categories are short names such as `study`, `work`, `health`, and `personal`. You can create a category simply by adding or updating a task with that name. Names are stored in lowercase, with a maximum of 40 characters. New and migrated tasks use `general` by default.
+
+```text
+Add Study linear algebra, high priority, due tomorrow, in category study.
+Move task 1 to category work.
+Show my pending tasks in category study.
+Show my categories with pending and completed counts.
+```
+
+Local commands:
+
+```text
+/category study
+/categories
+```
+
+## Daily planning
+
+```text
+Plan today with at most 3 tasks.
+Plan tomorrow with 5 tasks from category study.
+```
+
+The planner selects pending tasks in this order: overdue tasks, tasks due on the chosen date, then other pending work. Within each group, high priority comes first, then medium and low; earlier deadlines break ties. Tasks without a deadline follow dated tasks of the same priority. A plan includes a reason for each choice and the number of tasks left out.
+
+The default is five tasks, with a limit of 1 to 20. This is a suggested task list, not a timed calendar or a workload estimate. It does not change your deadlines or mark anything completed. Planning another date evaluates overdue and due tasks relative to that date.
+
+```text
+/plan
+/plan 2026-10-29
+```
+
+## Undo
+
+```text
+Undo my last change.
+```
+
+Or use `/undo` to undo directly without asking the model. Each undo reverses **one saved add, update, or completion**, across all categories. An add is removed; an update or completion restores the previous saved values. A message that adds ten tasks creates ten separate undo steps.
+
+History is stored in SQLite, so undo works after restarting the app. Searches, plans, exports, duplicate adds, and changes that do nothing do not add undo steps. Undo does not remove exported files and has no redo command. Old tasks remain editable, but changes made before this version had no history to restore. If a task was edited outside TaskMate, undo stops rather than overwriting that edit.
+
+## Search and export
+
+Search matches literal text in task titles, ignoring case. You can combine it with status, priority, and category filters. The `/search` command searches both pending and completed tasks.
+
+```text
+Find all tasks containing algebra in category study.
+Export my pending high-priority study tasks as CSV.
+Export all my tasks as JSON.
+```
+
+```text
+/search algebra
+/export csv
+/export json
+```
+
+The export tool and `/export` include all statuses by default, and create a new file inside an `exports` folder beside your database. They return the real path and number of exported tasks. Natural-language requests can apply filters. Files are never overwritten. Exports do not change tasks or undo history.
+
+CSV includes a header even when there are no matches. Titles that could be interpreted as spreadsheet formulas are prefixed with an apostrophe in CSV. JSON preserves the original saved text. Both formats include IDs, titles, dates, priorities, status, category, and timestamps.
+
+These options work without an API key or Ollama:
+
+```powershell
+.\.venv\Scripts\python.exe -m task_manager --list --all --search algebra --category study
+.\.venv\Scripts\python.exe -m task_manager --categories
+.\.venv\Scripts\python.exe -m task_manager --plan 2026-10-29 --limit 3 --category study
+.\.venv\Scripts\python.exe -m task_manager --export exports/study.csv --category study --priority high
+.\.venv\Scripts\python.exe -m task_manager --export exports/all-tasks.json --all
+.\.venv\Scripts\python.exe -m task_manager --undo
+```
+
+For command-line searches and exports, status defaults to pending. Add `--all` or `--status completed` to change it. Export format comes from the `.csv` or `.json` extension. Choose a new filename for another export.
+
+## Existing databases
+
+The app adds the category column and undo history table when it opens an older database. Task IDs, titles, dates, priorities, statuses, and timestamps are preserved. Existing tasks receive category `general`. Back up your database before upgrading if you want a separate copy. The feature tests use temporary databases and never change your personal tasks.
+
+### Feature test results
+
+The updated automated suite passes **33 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, and offline terminal options.
+
+A live check with **Ollama and `llama3.1:8b`** also passed on 28 October 2026, using a temporary database:
+
+| Request | Verified result |
+| --- | --- |
+| Add linear algebra in `study`, then repeat the request | One task saved; repeat returned the existing ID |
+| Change task 1 to `work` and low priority | Both fields changed in SQLite |
+| Undo the change | Category `study` and high priority restored |
+| Plan the day with up to three study tasks | Planner tool ran and returned the pending study task |
+| Search for `algebra` in `study` | Matching saved task returned |
+| Export study tasks as JSON | New file created; its contents matched the saved task |
+| Show category counts | `study: 1 pending, 0 completed` |
+
+CSV round-trips, empty exports, protection against overwriting files, and undoing adds and completions are covered by the automated tests. The live check above used JSON export and undo of an update. Natural language behavior can vary between models.
+
 ## Folder structure
 
 ```text
@@ -125,12 +234,15 @@ ai-agent/
 │   ├── cli.py          # Input, local commands, and readable errors
 │   ├── agent.py        # Model requests and the tool execution loop
 │   ├── ollama_client.py # Adapts the local model API to the agent
+│   ├── exporting.py    # Writes CSV and JSON files
+│   ├── formatting.py   # Displays database results consistently
 │   ├── tools.py        # Tool schemas, validation, and dispatch
 │   └── storage.py      # SQLite queries and task rules
 ├── tests/
 │   ├── __init__.py
 │   ├── test_agent.py
 │   ├── test_api_contract.py
+│   ├── test_features.py
 │   ├── test_ollama.py
 │   └── test_storage.py
 ├── .env.example
@@ -144,7 +256,7 @@ The app creates `data/tasks.db` on first use. Relative paths are based on the fo
 ## How the agent works
 
 1. The terminal passes your sentence to `TaskAgent`.
-2. The agent sends the sentence, conversation history, today's date, and four tool definitions to the model.
+2. The agent sends the sentence, conversation history, today's date, and the available tool definitions to the model.
 3. The model returns a tool name and JSON arguments.
 4. Python validates the name, fields, types, dates, and task values.
 5. The selected storage function runs a parameterized SQLite query.
@@ -159,8 +271,13 @@ OpenAI mode follows the [OpenAI function calling flow](https://developers.openai
 | `list_tasks()` | Filter tasks by status, priority, or part of a title |
 | `update_task()` | Change a title, deadline, or priority |
 | `complete_task()` | Mark an existing task completed |
+| `search_tasks()` | Search titles with optional filters |
+| `list_categories()` | Count pending and completed tasks by category |
+| `plan_day()` | Suggest a limited daily task list without changing it |
+| `undo_last_action()` | Reverse one saved task change |
+| `export_tasks()` | Write matching tasks to a new CSV or JSON file |
 
-For updates, `change_deadline` separates "leave the deadline alone" from "remove the deadline." The tool schema requires every field, so unchanged title and priority fields use `null`.
+For updates, `change_deadline` separates "leave the deadline alone" from "remove the deadline." The tool schema requires every field, so unchanged title, priority, and category fields use `null`.
 
 ## Run the tests
 
