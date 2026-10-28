@@ -172,13 +172,63 @@ Tests use temporary databases, a fake API client, and the real SDK with a local 
 
 Ollama tests also cover local multi-step calls, follow-up history, model errors, an unreachable server, and starting local mode without an OpenAI key. These use HTTP stubs, so the automated suite does not require Ollama or a downloaded model.
 
+To check a real downloaded model with ten sample tasks:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_local_model.py --model qwen3:4b
+```
+
+This uses a temporary database and does not change your saved tasks. It checks all ten titles, dates, priorities, pending status, ordering, actual list calls, a misspelled follow-up, duplicates, and persistence. Relative deadlines use the current date in Asia/Kolkata. A failed check exits with an error rather than claiming the run passed.
+
+## Verified sample run
+
+Tested on **28 October 2026**, using **Ollama with `llama3.1:8b`** and the **Asia/Kolkata** timezone. The live test used an empty temporary SQLite database. Your personal task database was not changed.
+
+Input:
+
+```text
+Add these tasks: Study linear algebra, high priority, due 2026-10-29; Go to the gym at 8 PM, medium priority, due today; Play cricket match, medium priority, due 10 days from today; Finish Python assignment, high priority, due tomorrow; Review matrix multiplication, high priority, due 2026-10-30; Read 20 pages, low priority, due 2026-10-28; Submit AI project report, high priority, due 2026-11-02; Buy groceries, medium priority, due 2026-10-31; Organize study notes, low priority, due 2026-11-01; Practice Python tool calling, medium priority, due 2026-11-03; then show all pending tasks ordered by priority.
+```
+
+Final result, checked against the saved database records:
+
+| ID | Task | Deadline | Priority | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Study linear algebra | 2026-10-29 | high | pending |
+| 4 | Finish Python assignment | 2026-10-29 | high | pending |
+| 5 | Review matrix multiplication | 2026-10-30 | high | pending |
+| 7 | Submit AI project report | 2026-11-02 | high | pending |
+| 2 | Go to the gym at 8 PM | 2026-10-28 | medium | pending |
+| 8 | Buy groceries | 2026-10-31 | medium | pending |
+| 10 | Practice Python tool calling | 2026-11-03 | medium | pending |
+| 3 | Play cricket match | 2026-11-07 | medium | pending |
+| 6 | Read 20 pages | 2026-10-28 | low | pending |
+| 9 | Organize study notes | 2026-11-01 | low | pending |
+
+**Result: passed.** All ten titles, dates, priorities, and pending statuses matched the sample request. The database returned four high, four medium, and two low priority tasks in priority order. Within each priority, earlier deadlines come first. Ten successful `add_task` calls and one successful `list_tasks` call were recorded.
+
+The follow-up `show me all tsks` made another successful `list_tasks` call and displayed the same ten records. No duplicate tasks were created. Reopening the database returned the same saved data. Task lists now print the database values directly, so a model's final summary cannot leave out records or change their IDs and order.
+
+The gym's **8 PM** stays in its title; this project stores deadlines as dates and does not send timed reminders. On the test date, **today** became `2026-10-28`, **tomorrow** became `2026-10-29`, and **10 days from today** became `2026-11-07`.
+
+The automated suite also passed: **19 tests, 0 failures**. These results describe this recorded run. Other models and later dates can produce different interpretations; the live-check script fails if its saved values do not match the expected sample data.
+
+To repeat the recorded model check:
+
+```powershell
+ollama pull llama3.1:8b
+.\.venv\Scripts\python.exe scripts/check_local_model.py --model llama3.1:8b
+```
+
 ## Notes and troubleshooting
 
 - Tasks persist after closing the app. Conversation history only lasts for the current session. Use `/reset` to start a new conversation or shorten a long one.
 - This is a single-user local project. It has no login, reminders, web interface, or integrations yet.
 - In OpenAI mode, messages and tool results are sent to OpenAI. Requests set `store=False`; this does not override the provider's other data policies. In Ollama mode, messages go to `OLLAMA_HOST`. The database stays local in both modes.
 - If an API request fails after a tool ran, the database change may already be saved. Use `/tasks` or `/all` before repeating a create request. Multiple actions are separate transactions, so a later failure does not undo earlier successful actions.
-- Automatic API retries are disabled to keep failures visible. OpenAI requests have a 30-second timeout; Ollama defaults to 180 seconds. Each user turn allows up to 12 model rounds.
+- Automatic API retries are disabled to keep failures visible. OpenAI requests have a 30-second timeout; Ollama defaults to 180 seconds. Each user turn allows up to 24 model rounds, enough for ten separate creates followed by a list.
+- If a local model returns a complete JSON tool plan instead of native tool calls on its first reply, the adapter accepts only known tool names and runs the arguments through the same validation. It does not extract calls from ordinary prose or recover a plan after tool results. Missing optional creation values and list filters use the normal Python defaults.
+- If the first reply does not contain usable tool calls, one retry uses Ollama's [structured outputs](https://docs.ollama.com/capabilities/structured-outputs) to request explicit tool names and arguments. A conversational reply can return an empty plan. No database operation runs from anonymous `[tool_call]` blocks themselves. The repaired plan still goes through tool validation.
 - HTTP 401 usually means the API key needs checking. For HTTP 429, check API billing and rate limits. Model access errors may need a different `OPENAI_MODEL` value.
 - If the database cannot open, check `TASK_DB_PATH`, folder permissions, and disk space.
 

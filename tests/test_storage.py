@@ -51,10 +51,19 @@ class StorageTests(unittest.TestCase):
         tools = TaskTools(self.store)
         for name, arguments in (("delete_task", "{}"), ("add_task", "oops"),
                                 ("complete_task", '{"task_id":true}'),
-                                ("list_tasks", '{"status":"pending"}'),
+                                ("complete_task", '{}'),
                                 ("complete_task", '{"task_id":1,"extra":2}')):
             self.assertFalse(tools.execute(name, arguments)["ok"])
         self.assertEqual(self.store.list_tasks(status="all"), [])
+
+    def test_omitted_filters_and_creation_defaults(self):
+        tools = TaskTools(self.store)
+        self.assertTrue(tools.execute("add_task", '{"title":"Read notes"}')["ok"])
+        result = tools.execute("list_tasks", '{"status":"all"}')
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"][0]["priority"], "medium")
+        self.assertIsNone(result["result"][0]["deadline"])
+        self.assertFalse(tools.execute("list_tasks", '{"status":"all","extra":1}')["ok"])
 
     def test_tool_update_can_remove_deadline_without_changing_title(self):
         import json

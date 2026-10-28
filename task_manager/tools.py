@@ -54,8 +54,11 @@ def validate(value, schema):
     if "enum" in schema and value not in schema["enum"]:
         raise ValueError("Tool argument has an unsupported value.")
     if isinstance(value, dict):
-        if set(value) != set(schema["required"]):
-            raise ValueError("Tool arguments have missing or unknown fields.")
+        missing = set(schema["required"]) - set(value)
+        unknown = set(value) - set(schema["properties"])
+        if missing or unknown:
+            raise ValueError(f"Missing fields: {', '.join(sorted(missing)) or 'none'}. "
+                             f"Unknown fields: {', '.join(sorted(unknown)) or 'none'}.")
         for key, item in value.items():
             validate(item, schema["properties"][key])
 
@@ -70,6 +73,14 @@ class TaskTools:
             if definition is None:
                 raise ValueError("Unknown tool.")
             arguments = json.loads(raw_arguments)
+            # Local models sometimes leave out optional filters. These defaults
+            # match our Python functions; required IDs and titles stay required.
+            if isinstance(arguments, dict):
+                defaults = {
+                    "add_task": {"deadline": None, "priority": "medium"},
+                    "list_tasks": {"status": "pending", "priority": None, "search": None},
+                }.get(name, {})
+                arguments = {**defaults, **arguments}
             validate(arguments, definition["parameters"])
             if name == "update_task":
                 requested = arguments["changes"]
