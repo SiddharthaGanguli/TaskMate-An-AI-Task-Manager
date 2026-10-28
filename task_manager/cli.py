@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from openai import APIConnectionError, APIStatusError, OpenAI
 
 from task_manager.agent import TaskAgent
+from task_manager.ollama_client import OllamaClient, OllamaError
 from task_manager.storage import TaskStore
 from task_manager.tools import TaskTools
 
@@ -34,22 +35,39 @@ def main():
     parser.add_argument("--list", action="store_true", help="List saved tasks without an API key.")
     parser.add_argument("--all", action="store_true", help="Include completed tasks with --list.")
     parser.add_argument("--db", default=os.getenv("TASK_DB_PATH", "data/tasks.db"))
+    parser.add_argument("--provider", choices=("openai", "ollama"),
+                        default=os.getenv("LLM_PROVIDER", "openai"), help="Choose cloud or local inference.")
+    parser.add_argument("--model", help="Override the selected provider's model.")
     args = parser.parse_args()
     try:
         store = TaskStore(Path(args.db))
         if args.list:
             show_tasks(store.list_tasks(status="all" if args.all else "pending"))
             return
-        key = os.getenv("OPENAI_API_KEY", "").strip()
-        if not key or key == "put_your_api_key_here":
-            print("Add your OPENAI_API_KEY to .env first. See .env.example.")
+        if args.provider not in ("openai", "ollama"):
+            print("LLM_PROVIDER must be openai or ollama.")
             raise SystemExit(1)
-        client_context = OpenAI(api_key=key, timeout=30, max_retries=0)
-        model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        if args.provider == "ollama":
+            try:
+                timeout = float(os.getenv("OLLAMA_TIMEOUT", "180"))
+                if not 0 < timeout < float("inf"):
+                    raise ValueError
+            except ValueError:
+                print("OLLAMA_TIMEOUT must be a positive number of seconds.")
+                raise SystemExit(1)
+            client_context = OllamaClient(os.getenv("OLLAMA_HOST", "http://localhost:11434"), timeout)
+            model = args.model or os.getenv("OLLAMA_MODEL", "qwen3:4b")
+        else:
+            key = os.getenv("OPENAI_API_KEY", "").strip()
+            if not key or key == "put_your_api_key_here":
+                print("Add your OPENAI_API_KEY to .env, or use --provider ollama for a local model.")
+                raise SystemExit(1)
+            client_context = OpenAI(api_key=key, timeout=30, max_retries=0)
+            model = args.model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         with client_context as client:
             agent = TaskAgent(client, TaskTools(store), model,
                               os.getenv("TASK_TIMEZONE", "Asia/Kolkata"))
-            print(f"TaskMate | {model}\n" + HELP)
+            print(f"TaskMate | {args.provider} | {model}\n" + HELP)
             while True:
                 try:
                     message = input("\nYou: ").strip()
@@ -71,6 +89,8 @@ def main():
                 else:
                     try:
                         print("Agent: " + agent.run(message))
+                    except OllamaError as error:
+                        print(f"{error} Use /tasks before retrying; changes may already be saved.")
                     except APIConnectionError:
                         print("Could not reach the API. Check your connection. Use /tasks before retrying; changes may already be saved.")
                     except APIStatusError as error:
