@@ -208,7 +208,7 @@ The app adds the category column and undo history table when it opens an older d
 
 ### Feature test results
 
-The updated automated suite passes **33 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, and offline terminal options.
+The updated automated suite passes **34 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, offline terminal options, and one complete workflow using all nine tools.
 
 A live check with **Ollama and `llama3.1:8b`** also passed on 28 October 2026, using a temporary database:
 
@@ -243,6 +243,7 @@ ai-agent/
 │   ├── test_agent.py
 │   ├── test_api_contract.py
 │   ├── test_features.py
+│   ├── test_full_workflow.py
 │   ├── test_ollama.py
 │   └── test_storage.py
 ├── .env.example
@@ -284,6 +285,58 @@ For updates, `change_deadline` separates "leave the deadline alone" from "remove
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -v
 ```
+
+## Complete workflow test: all features together
+
+The test is in [tests/test_full_workflow.py](tests/test_full_workflow.py), named `test_all_features_in_one_session`. It runs a complete session through `TaskAgent` and all nine tools, using a temporary SQLite database and real CSV and JSON files.
+
+Only the model replies are scripted. The test does not need OpenAI, Ollama, an API key, or downloaded model weights. It verifies tool execution and saved results; it does not measure a live model's ability to understand these sentences. The live model results are documented separately below.
+
+Run just this workflow:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_full_workflow -v
+```
+
+Sample tasks:
+
+| ID | Title | Deadline | Priority | Category |
+| --- | --- | --- | --- | --- |
+| 1 | Study linear algebra | 2026-10-29 | high | study |
+| 2 | Go to the gym at 8 PM | 2026-10-28 | medium | health |
+| 3 | Submit AI project report | 2026-10-27 | high | work |
+
+The planner uses the fixed date **28 October 2026**, so this test stays repeatable on later dates.
+
+| Step | Action | Verified result |
+| --- | --- | --- |
+| 1 | Add all three tasks in one request | Three records saved with the correct fields |
+| 2 | Repeat algebra with different case, spacing, and low priority | Existing ID returned; no duplicate; saved high priority preserved |
+| 3 | Rename algebra and change its deadline, priority, and category | New title, date, low priority, and math category saved |
+| 4 | Undo the update | All original fields restored |
+| 5 | Add a temporary task, then undo its add | Temporary task removed; original three records unchanged |
+| 6 | Complete gym, undo completion, then complete it again | Status changes saved and reversed correctly |
+| 7 | Plan two tasks for 2026-10-28 | Overdue report first, then algebra; completed gym excluded |
+| 8 | Search for ALGEBRA with pending, high priority, and study filters | Only task 1 returned; search ignores case |
+| 9 | List categories | health: 1 completed; study: 1 pending; work: 1 pending |
+| 10 | Export all tasks as CSV | Three exported rows, including completed gym, in priority order |
+| 11 | Export study tasks as JSON | One record matching the saved algebra task exactly |
+| 12 | Check records after planning, search, counts, and exports | No saved task data changed |
+| 13 | Reopen SQLite and start a new agent conversation | The same three records returned and displayed |
+| 14 | Undo after restarting | Last gym completion reversed; reads and exports did not consume undo history |
+| 15 | Check the exported files after undo | Both files still exist; undo only changed the task database |
+
+Final database state after the last undo:
+
+| ID | Title | Deadline | Priority | Status | Category |
+| --- | --- | --- | --- | --- | --- |
+| 3 | Submit AI project report | 2026-10-27 | high | pending | work |
+| 1 | Study linear algebra | 2026-10-29 | high | pending | study |
+| 2 | Go to the gym at 8 PM | 2026-10-28 | medium | pending | health |
+
+The CSV captured gym as completed when the export was made. Undoing its completion later does not rewrite that exported snapshot.
+
+**Verified result on 28 October 2026:** the complete workflow passed, and the full automated suite passed **34 tests with 0 failures**. All files and database records from this workflow are created in a temporary folder and cleaned up afterward. Your personal task database is untouched.
 
 Tests use temporary databases, a fake API client, and the real SDK with a local HTTP stub. They check persistence, filters, ordering, invalid input, safe SQL handling, deadline removal, repeated completion, multi-step calls, API failure recovery, SDK request serialization, and the tool-call limit. They do not spend API credits or prove how a live model will interpret every sentence.
 
