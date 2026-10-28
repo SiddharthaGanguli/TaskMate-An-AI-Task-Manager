@@ -1,6 +1,6 @@
 # TaskMate — An AI Task Manager
 
-A terminal app that turns normal sentences into real task actions. Python runs the tools, SQLite saves the tasks, and an LLM decides which tool to call. There is no agent framework.
+A personal task app with a terminal interface, web dashboard, and Chrome/Edge extension. Python runs the tools, SQLite saves the tasks, and an LLM decides which tool to call. There is no agent framework.
 
 For example:
 
@@ -96,6 +96,89 @@ Task IDs come from SQLite. Replace `1` with an ID in your list. If you refer to 
 Dates are stored as `YYYY-MM-DD`. The model receives today's date in `TASK_TIMEZONE` on every request. For a weekday such as Friday, the app instructs it to use the next occurrence, including today. Unclear dates should lead to a question. Natural language interpretation still depends on the model, so review the saved date.
 
 New tasks default to medium priority, pending status, and no deadline.
+
+## Web dashboard
+
+The dashboard is an extension of the same Python app. It uses your existing task database, including categories, duplicate detection, planning, undo, and exports. There is no separate cloud database or frontend build step.
+
+Install or update the Python package, then start the server:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m task_manager.web
+```
+
+Open **http://127.0.0.1:8765** in Chrome or Edge. The installed `taskmate-web` command starts the same server.
+
+| Dashboard area | What you can do |
+| --- | --- |
+| Overview | See real pending, due-today, high-priority, and completed counts |
+| Task list | Create, edit, complete, search, and filter tasks |
+| Navigation | Open all tasks, today, upcoming, completed, or a category |
+| Daily focus | Choose a date and task limit, then build a plan |
+| Undo | Reverse one saved task change |
+| Exports | Download filtered CSV or JSON files |
+| Assistant | Chat with the same tool-calling agent; export requests include download links |
+| Connection settings | Choose OpenAI or Ollama and a model for this browser session |
+
+Manual task actions, planning, search, undo, and exports do not need a model or an API key. Chat uses the selected provider and your server-side `.env` settings. OpenAI keys are never sent to the browser. Changing models clears conversation memory, while tasks stay saved.
+
+The interface has a warm neutral palette, coral actions, category colors, keyboard focus states, native task dialogs, and responsive layouts. Use **Ctrl+K** or **Cmd+K** to focus search. **Enter** sends a chat message; **Shift+Enter** adds a new line.
+
+The server reads `TASK_DB_PATH` and `TASK_TIMEZONE` from `.env`. To use another database or port:
+
+```powershell
+.\.venv\Scripts\python.exe -m task_manager.web --db data/my-tasks.db --port 8766
+```
+
+Conversation memory and model choices are temporary, separated by browser session, and cleared when the server restarts. Tasks and undo history remain in SQLite. Tabs sharing the same browser cookies share a conversation; overlapping chat requests are rejected while a message is being processed.
+
+This is a single-user local server bound to `127.0.0.1`. It has no public login or hosted service. Mutations require a server-issued request token, foreign web origins are rejected, and task text is rendered as text rather than HTML. The extension is allowed to call the local API with its host permission and request token.
+
+## Chrome and Edge extension
+
+The **Manifest V3** companion is in [browser-extension](browser-extension). It provides a compact workspace in the browser toolbar:
+
+- Add a task with a deadline, priority, and category.
+- Search pending tasks and see the next five in priority order.
+- Complete tasks or undo the last saved change.
+- See real pending, due-today, and completed counts.
+- Open the full dashboard in one click.
+- Change the local server address and recover from an offline connection.
+
+Start the TaskMate web server first. Then install the extension locally:
+
+1. Open `chrome://extensions` or `edge://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select the project's `browser-extension` folder.
+4. Pin TaskMate to the toolbar, then click its icon.
+
+If you changed the server port, open the popup's connection settings and enter the matching address, such as `http://127.0.0.1:8766`.
+
+The extension requests local storage and access to `localhost` / `127.0.0.1` only. It does not read page contents, browsing history, or API keys. Storage saves only the chosen server address. It needs the local server to be running and does not start Python or Ollama itself.
+
+To make an unpackable ZIP:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/package_extension.py
+```
+
+This writes `dist/taskmate-extension.zip`. Extract it, then load the extracted folder using the steps above. This project provides an unpacked extension; it is not a Chrome Web Store listing.
+
+### Web and extension verification
+
+The current Python suite passes **47 tests**, including the web API and extension resource checks. Tests cover real SQLite changes, request tokens, origin checks, duplicate detection, filters, planning, exports and downloads, isolated conversations, model outages, and overlapping chat requests.
+
+Two additional **browserless DOM integration tests** run the actual dashboard and popup JavaScript against a disposable Python HTTP server. They cover create/edit/complete/undo, duplicate feedback, filters, plans, downloads, chat, model settings, popup quick add and search, connection settings, and offline recovery. A simulated model failure verifies that partially saved tasks still refresh and the error remains visible. The model is scripted in these tests, and extension storage/tab APIs are mocked.
+
+Node.js is optional and only needed for these interface tests:
+
+```powershell
+npm ci
+npm run test:web
+```
+
+These checks do not measure visual layout or install an extension into Chrome. Windows browser automation could not reliably verify the current URL during this session, so automated visual inspection and a real unpacked-install check remain unverified. The Python API, packaged resources, and browserless interactions passed. Your personal database is not used by the test suite.
 
 ## Terminal commands
 
@@ -208,7 +291,7 @@ The app adds the category column and undo history table when it opens an older d
 
 ### Feature test results
 
-The updated automated suite passes **34 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, offline terminal options, and one complete workflow using all nine tools.
+The updated automated suite passes **47 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, offline terminal options, one complete workflow using all nine tools, and the web API.
 
 A live check with **Ollama and `llama3.1:8b`** also passed on 28 October 2026, using a temporary database:
 
@@ -236,6 +319,8 @@ ai-agent/
 │   ├── ollama_client.py # Adapts the local model API to the agent
 │   ├── exporting.py    # Writes CSV and JSON files
 │   ├── formatting.py   # Displays database results consistently
+│   ├── web.py          # Local dashboard and extension API
+│   ├── web_assets/     # Buildless HTML, CSS, JavaScript, and icons
 │   ├── tools.py        # Tool schemas, validation, and dispatch
 │   └── storage.py      # SQLite queries and task rules
 ├── tests/
@@ -244,9 +329,14 @@ ai-agent/
 │   ├── test_api_contract.py
 │   ├── test_features.py
 │   ├── test_full_workflow.py
+│   ├── test_web.py
+│   ├── web/            # Browserless interface tests and their server fixture
 │   ├── test_ollama.py
 │   └── test_storage.py
 ├── .env.example
+├── browser-extension/  # Chrome/Edge popup, manifest, and icons
+├── scripts/            # Live model check and extension packaging
+├── package.json        # Optional interface test dependencies
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
@@ -393,7 +483,7 @@ ollama pull llama3.1:8b
 ## Notes and troubleshooting
 
 - Tasks persist after closing the app. Conversation history only lasts for the current session. Use `/reset` to start a new conversation or shorten a long one.
-- This is a single-user local project. It has no login, reminders, web interface, or integrations yet.
+- This is a single-user local project with terminal, web, and browser extension interfaces. It has no public login, timed reminders, or third-party task integrations.
 - In OpenAI mode, messages and tool results are sent to OpenAI. Requests set `store=False`; this does not override the provider's other data policies. In Ollama mode, messages go to `OLLAMA_HOST`. The database stays local in both modes.
 - If an API request fails after a tool ran, the database change may already be saved. Use `/tasks` or `/all` before repeating a create request. Multiple actions are separate transactions, so a later failure does not undo earlier successful actions.
 - Automatic API retries are disabled to keep failures visible. OpenAI requests have a 30-second timeout; Ollama defaults to 180 seconds. Each user turn allows up to 24 model rounds, enough for ten separate creates followed by a list.

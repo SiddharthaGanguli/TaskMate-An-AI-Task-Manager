@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "TaskMate · A little more focus",
+  "version": "1.2.0",
+  "description": "Quickly add, find, and complete tasks in your local TaskMate workspace. Open your dashboard in one click.",
+  "minimum_chrome_version": "109",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Open TaskMate",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:* http://localhost:*"
+  }
+}

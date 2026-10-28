@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TaskMate</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script src="popup.js" type="module"></script>
+  </head>
+  <body>
+    <header>
+      <a
+        class="brand"
+        id="brand-link"
+        href="http://127.0.0.1:8765"
+        target="_blank"
+        rel="noreferrer"
+        ><img
+          src="icons/icon-48.png"
+          alt=""
+          width="28"
+          height="28"
+        />taskmate<span>.</span></a
+      ><button
+        id="settings-button"
+        class="icon-button"
+        aria-label="Connection settings"
+      >
+        ⚙
+      </button>
+    </header>
+    <div class="intro">
+      <span class="eyebrow">A LITTLE LESS ON YOUR MIND</span>
+      <h1>Make room for your day<span>.</span></h1>
+      <div class="connection">
+        <i id="status-dot"></i
+        ><span id="status">Connecting to your workspace…</span
+        ><button id="refresh" class="link-button">Refresh</button>
+      </div>
+    </div>
+    <section id="offline" class="offline" hidden>
+      <strong>Your workspace is taking a little break.</strong>
+      <p>Start the TaskMate server on your computer, then refresh.</p>
+      <code>python -m task_manager.web</code>
+      <p>Use connection settings if you changed the port.</p>
+    </section>
+    <section id="settings" hidden>
+      <form id="settings-form">
+        <label
+          >Local dashboard address<input
+            id="server-url"
+            type="url"
+            value="http://127.0.0.1:8765"
+            required /></label
+        ><small
+          >Use localhost or 127.0.0.1. TaskMate runs on your computer.</small
+        ><button class="button primary" type="submit">Save connection</button>
+      </form>
+    </section>
+    <div id="workspace" hidden>
+      <div class="mini-stats">
+        <div><strong id="pending-count">0</strong><span>pending</span></div>
+        <div><strong id="today-count">0</strong><span>due today</span></div>
+        <div><strong id="done-count">0</strong><span>completed</span></div>
+      </div>
+      <form class="quick-add" id="quick-add">
+        <label for="title">GET IT OFF YOUR MIND</label
+        ><input
+          id="title"
+          maxlength="200"
+          placeholder="What needs doing?"
+          required
+        />
+        <div class="form-row">
+          <label><span>Deadline</span><input type="date" id="deadline" /></label
+          ><label
+            ><span>Priority</span
+            ><select id="priority">
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select></label
+          >
+        </div>
+        <div class="add-row">
+          <input
+            id="category"
+            list="categories"
+            maxlength="40"
+            placeholder="Category"
+            value="general"
+            aria-label="Category"
+            required
+          /><datalist id="categories"></datalist
+          ><button class="button primary" id="add-task" type="submit">
+            + Add task
+          </button>
+        </div>
+      </form>
+      <div class="list-heading">
+        <h2>Your next small steps</h2>
+        <span id="list-count">0 tasks</span>
+      </div>
+      <input
+        type="search"
+        id="search"
+        class="search"
+        placeholder="Find a pending task…"
+        aria-label="Search pending tasks"
+      />
+      <div id="tasks" class="tasks" aria-live="polite"></div>
+      <div class="list-footer">
+        <button id="undo" class="link-button">↶ Undo last change</button
+        ><span id="more-tasks"></span>
+      </div>
+    </div>
+    <p id="message" class="message" role="status" hidden></p>
+    <footer>
+      <button id="open-dashboard" class="button dark">
+        Open my workspace <span>↗</span>
+      </button>
+      <p>Your tasks. Your device. Your pace.</p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "taskmate-interface-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:web": "node --test tests/web/interface.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0",
+    "prettier": "^3.9.10"
+  }
+}

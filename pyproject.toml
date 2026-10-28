@@ -4,13 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-task-manager"
-version = "1.1.0"
+version = "1.2.0"
 description = "TaskMate: a terminal task agent with real tools and SQLite storage."
 requires-python = ">=3.11"
-dependencies = ["openai>=2.0,<3", "httpx>=0.27,<1", "python-dotenv>=1.0,<2", "tzdata>=2025.1"]
+dependencies = ["openai>=2.0,<3", "httpx>=0.27,<1", "python-dotenv>=1.0,<2", "tzdata>=2025.1", "fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
 
 [project.scripts]
 task-agent = "task_manager.cli:main"
+taskmate-web = "task_manager.web:main"
 
 [tool.setuptools.packages.find]
 include = ["task_manager*"]
+
+[tool.setuptools.package-data]
+task_manager = ["web_assets/*"]
