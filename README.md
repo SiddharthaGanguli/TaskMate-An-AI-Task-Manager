@@ -123,7 +123,13 @@ Open **http://127.0.0.1:8765** in Chrome or Edge. The installed `taskmate-web` c
 
 Manual task actions, planning, search, undo, and exports do not need a model or an API key. Chat uses the selected provider and your server-side `.env` settings. OpenAI keys are never sent to the browser. Changing models clears conversation memory, while tasks stay saved.
 
-The interface has a warm neutral palette, coral actions, category colors, keyboard focus states, native task dialogs, and responsive layouts. Use **Ctrl+K** or **Cmd+K** to focus search. **Enter** sends a chat message; **Shift+Enter** adds a new line.
+The interface is an AI agent workspace with a dark graphite palette, violet actions, and a large central conversation. Prompt cards help you start a request; the model selector stays visible above the chat. Saved tasks and daily plans sit in a side panel so results stay alongside the conversation. Use **Ctrl+K** or **Cmd+K** to focus search. **Enter** sends a chat message; **Shift+Enter** adds a new line.
+
+### See the agent at work
+
+The Agent activity panel shows real tool names, execution status, measured duration, arguments, and result summaries. It refreshes while a chat request is running. Expand a tool entry to inspect its arguments and outcome. Each assistant message records how many tool calls succeeded, and exports remain downloadable from chat.
+
+The activity panel starts empty and records observable execution rather than model reasoning. A model request can complete without calling tools. Rejected tool arguments are shown as errors; a model failure leaves any successful tool actions visible so you can check your saved tasks before retrying. New conversation clears chat and activity, while saved tasks stay in SQLite.
 
 The server reads `TASK_DB_PATH` and `TASK_TIMEZONE` from `.env`. To use another database or port:
 
@@ -167,7 +173,7 @@ This writes `dist/taskmate-extension.zip`. Extract it, then load the extracted f
 
 ### Web and extension verification
 
-The current Python suite passes **47 tests**, including the web API and extension resource checks. Tests cover real SQLite changes, request tokens, origin checks, duplicate detection, filters, planning, exports and downloads, isolated conversations, model outages, and overlapping chat requests.
+The current Python suite passes **48 tests**, including the web API and extension resource checks. Tests cover real SQLite changes, request tokens, origin checks, duplicate detection, filters, planning, exports and downloads, isolated conversations, model outages, and overlapping chat requests.
 
 Two additional **browserless DOM integration tests** run the actual dashboard and popup JavaScript against a disposable Python HTTP server. They cover create/edit/complete/undo, duplicate feedback, filters, plans, downloads, chat, model settings, popup quick add and search, connection settings, and offline recovery. A simulated model failure verifies that partially saved tasks still refresh and the error remains visible. The model is scripted in these tests, and extension storage/tab APIs are mocked.
 
@@ -291,7 +297,7 @@ The app adds the category column and undo history table when it opens an older d
 
 ### Feature test results
 
-The updated automated suite passes **47 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, offline terminal options, one complete workflow using all nine tools, and the web API.
+The updated automated suite passes **48 tests**. It covers duplicate retries arriving together, Unicode search, combined category filters, planning order, undo after restart, external-edit protection, old-database migration, CSV and JSON contents, offline terminal options, one complete workflow using all nine tools, and the web API.
 
 A live check with **Ollama and `llama3.1:8b`** also passed on 28 October 2026, using a temporary database:
 

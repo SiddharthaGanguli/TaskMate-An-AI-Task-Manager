@@ -268,9 +268,9 @@ function renderTasks() {
 function renderView() {
   const titles = {
     overview: [
-      "Your day, made simple",
-      "A little less mental clutter. A little more room for what matters.",
-      "Overview",
+      "Agent workspace",
+      "Describe the outcome. Let your agent handle the steps.",
+      "AI workspace",
     ],
     tasks: [
       state.category
@@ -321,15 +321,156 @@ function renderView() {
 function renderChat(messages) {
   if (state.chatBusy) return;
   $("#chat-messages").replaceChildren();
-  if (!messages.length)
-    appendMessage(
-      "assistant",
-      "What’s on your mind? Tell me what needs doing, and we’ll make it a task.",
+  if (!messages.length) {
+    const welcome = node("section", "agent-welcome");
+    const mark = node("div", "welcome-mark");
+    mark.append(icon("spark"));
+    welcome.append(
+      mark,
+      node("span", "welcome-kicker", "YOUR PERSONAL AI TASK AGENT"),
+      node("h2", "", "From a thought to a done deal."),
+      node(
+        "p",
+        "welcome-description",
+        "What’s on your mind? Give TaskMate a goal in your own words. Your model chooses the tools, and your workspace keeps the results.",
+      ),
     );
-  else
+    const cards = node("div", "prompt-grid");
+    const prompts = [
+      [
+        "calendar",
+        "Find my focus",
+        "Build a plan from my pending tasks.",
+        "Plan today with at most 3 tasks.",
+      ],
+      [
+        "plus",
+        "Get it off my mind",
+        "Turn an idea into a saved task.",
+        "Add Study linear algebra for tomorrow, high priority, in category study.",
+      ],
+      [
+        "search",
+        "Find what matters",
+        "Bring important tasks into view.",
+        "Find my high-priority pending tasks.",
+      ],
+      [
+        "download",
+        "Take my work with me",
+        "Export my task memory.",
+        "Export all my tasks as CSV.",
+      ],
+    ];
+    for (const [symbol, title, description, prompt] of prompts) {
+      const button = node("button", "prompt-card");
+      button.append(
+        icon(symbol),
+        node("strong", "", title),
+        node("small", "", description),
+        icon("arrow"),
+      );
+      button.addEventListener("click", () => {
+        $("#chat-input").value = prompt;
+        $("#chat-input").focus();
+      });
+      cards.append(button);
+    }
+    welcome.append(cards);
+    const capabilities = node("div", "capability-line");
+    capabilities.append(
+      node("span", "", "Natural language"),
+      node("span", "", "Real tool calls"),
+      node("span", "", "Persistent memory"),
+    );
+    welcome.append(capabilities);
+    $("#chat-messages").append(welcome);
+  } else
     messages.forEach((message) =>
-      appendMessage(message.role, message.content, message.downloads),
+      appendMessage(
+        message.role,
+        message.content,
+        message.downloads,
+        message.activity,
+      ),
     );
+}
+
+function executionTime(milliseconds) {
+  return milliseconds < 1000
+    ? `${milliseconds} ms`
+    : `${(milliseconds / 1000).toFixed(1)} s`;
+}
+
+function renderActivity(activity = [], run = { phase: "idle", elapsed_ms: 0 }) {
+  $("#activity-list").replaceChildren();
+  $("#activity-count").textContent = activity.length;
+  const phaseLabels = {
+    idle: "Idle",
+    working: "Running",
+    complete: "Complete",
+    error: "Needs attention",
+  };
+  $("#run-phase").textContent = phaseLabels[run.phase] || "Idle";
+  $("#run-phase").dataset.phase = run.phase;
+  $("#run-time").textContent =
+    run.phase === "idle" ? "—" : executionTime(run.elapsed_ms);
+  if (!activity.length)
+    $("#activity-list").append(
+      node(
+        "p",
+        "activity-empty",
+        run.phase === "working"
+          ? "Your model is processing the request. Tool calls will appear as they execute."
+          : "Send a request to see which tools your model calls and what they return.",
+      ),
+    );
+  for (const event of activity) {
+    const item = node("details", `tool-event ${event.status}`);
+    const heading = node("summary", "tool-heading");
+    const status = node("span", "tool-status");
+    status.append(
+      icon(
+        event.status === "error"
+          ? "close"
+          : event.status === "running"
+            ? "refresh"
+            : "check",
+      ),
+    );
+    status.append(node("span", "sr-only", event.status));
+    heading.append(
+      status,
+      node("code", "", `${event.tool}()`),
+      node(
+        "small",
+        "",
+        event.duration_ms === null
+          ? "running"
+          : executionTime(event.duration_ms),
+      ),
+    );
+    item.append(
+      heading,
+      node("p", "tool-result", event.summary || "Executing tool…"),
+      node("pre", "tool-arguments", JSON.stringify(event.arguments, null, 2)),
+    );
+    $("#activity-list").append(item);
+  }
+  const running = activity.find((event) => event.status === "running");
+  $("#agent-status").textContent =
+    run.phase === "working"
+      ? running
+        ? `Executing ${running.tool}()`
+        : activity.length
+          ? "Model is preparing a response"
+          : "Model is processing your request"
+      : run.phase === "complete"
+        ? "Request completed"
+        : run.phase === "error"
+          ? "Request interrupted · review activity"
+          : "Ready for your next request";
+  $(".live-dot").classList.toggle("working", run.phase === "working");
 }
 
 async function refresh() {
@@ -364,10 +505,14 @@ async function refresh() {
       : "OpenAI · cloud AI";
   $("#model-label").textContent = data.preferences.model;
   $("#assistant-model").textContent = data.preferences.model.toUpperCase();
+  $("#active-model").textContent = data.preferences.model;
+  $("#provider-kind").textContent =
+    data.preferences.provider === "ollama" ? "LOCAL" : "CLOUD";
   if (!$("#plan-date").value) $("#plan-date").value = data.today;
   renderCategories();
   renderView();
   renderChat(data.messages);
+  renderActivity(data.activity, data.run);
   if (state.planActive) await buildPlan(false);
 }
 
@@ -437,9 +582,24 @@ async function buildPlan(showMessage = true) {
   if (showMessage) toast("Your daily focus is ready.");
 }
 
-function appendMessage(role, text, downloads = []) {
+function appendMessage(role, text, downloads = [], activity = []) {
   const message = node("div", `chat-message ${role}`);
+  message.append(
+    node(
+      "div",
+      "message-author",
+      role === "user" ? "YOU" : role === "error" ? "REQUEST ERROR" : "TASKMATE",
+    ),
+  );
   message.append(node("p", "", text));
+  if (activity.length)
+    message.append(
+      node(
+        "div",
+        "message-tools",
+        `${activity.length} tool call${activity.length === 1 ? "" : "s"} · ${activity.filter((event) => event.status === "success").length} succeeded`,
+      ),
+    );
   for (const report of downloads) {
     const link = node(
       "a",
@@ -495,15 +655,26 @@ $("#chat-form").addEventListener("submit", async (event) => {
   const text = $("#chat-input").value.trim();
   if (!text) return;
   state.chatBusy = true;
+  $(".agent-welcome")?.remove();
   $("#chat-input").value = "";
   $("#send-chat").disabled = true;
   $("#undo-button").disabled = true;
   $("#reset-chat").disabled = true;
   $("#chat-state").textContent =
-    "Working on it. Local models can take a moment…";
+    "Waiting for your model · watch activity on the right";
   $("#chat-messages").setAttribute("aria-busy", "true");
   appendMessage("user", text);
-  const working = appendMessage("assistant", "Making a little room for that…");
+  const working = appendMessage("assistant", "Processing your request…");
+  let polling = false;
+  const pollTimer = setInterval(() => {
+    if (polling) return;
+    polling = true;
+    refresh()
+      .catch(() => {})
+      .finally(() => {
+        polling = false;
+      });
+  }, 1000);
   let failure = "";
   try {
     await api("/api/chat", "POST", { message: text });
@@ -515,11 +686,13 @@ $("#chat-form").addEventListener("submit", async (event) => {
       true,
     );
   } finally {
+    clearInterval(pollTimer);
     state.chatBusy = false;
     $("#send-chat").disabled = false;
     $("#undo-button").disabled = false;
     $("#reset-chat").disabled = false;
-    $("#chat-state").textContent = "Natural language. Real actions.";
+    $("#chat-state").textContent =
+      "Enter to send · Shift + Enter for a new line";
     $("#chat-messages").setAttribute("aria-busy", "false");
     // Always reload tasks: a failed model turn may have saved some actions.
     try {
@@ -683,6 +856,12 @@ $("#connection-button").addEventListener("click", () => {
   $("#settings-error").hidden = true;
   $("#settings-dialog").showModal();
   modelInfo();
+});
+$("#top-connection").addEventListener("click", () =>
+  $("#connection-button").click(),
+);
+$("#new-conversation").addEventListener("click", () => {
+  if (!state.chatBusy) $("#reset-chat").click();
 });
 $("#provider").addEventListener("change", () => {
   $("#model").value =

@@ -270,6 +270,10 @@ test("dashboard: create, duplicate, edit, filters, complete, undo, plan, export,
         $("#chat-messages").textContent.includes("Added from dashboard chat"),
       "chat action",
     );
+    assert.equal($("#activity-count").textContent, "1");
+    assert.match($(".tool-event.success code").textContent, /add_task/);
+    assert.match($(".tool-result").textContent, /saved/);
+    assert.equal($("#run-phase").textContent, "Complete");
     assert.ok(
       $$(".task-title").some(
         (item) => item.textContent === "Added from dashboard chat",
@@ -284,6 +288,19 @@ test("dashboard: create, duplicate, edit, filters, complete, undo, plan, export,
     const chatExport = await fetch($(".chat-download").href);
     assert.equal(chatExport.status, 200);
     assert.match(await chatExport.text(), /Added from dashboard chat/);
+    fill("#chat-input", "Take a moment");
+    submit("#chat-form");
+    await waitFor(
+      () => $("#run-phase").textContent === "Running",
+      "live run polling",
+    );
+    assert.equal($("#activity-count").textContent, "0");
+    await waitFor(
+      () =>
+        !$("#send-chat").disabled && $("#run-phase").textContent === "Complete",
+      "finished run polling",
+    );
+    assert.equal($("#activity-count").textContent, "1");
     fill("#chat-input", "Fail after saving");
     submit("#chat-form");
     await waitFor(
@@ -299,6 +316,8 @@ test("dashboard: create, duplicate, edit, filters, complete, undo, plan, export,
       $(".chat-message.error").textContent,
       /Check tasks before retrying/,
     );
+    assert.equal($("#run-phase").textContent, "Needs attention");
+    assert.match($(".tool-result").textContent, /saved/);
 
     $("#connection-button").click();
     fill("#model", "test-ui-model");

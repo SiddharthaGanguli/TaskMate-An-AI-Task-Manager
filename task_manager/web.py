@@ -1,6 +1,7 @@
 """Serve the dashboard and extension from the same local task database."""
 
 import argparse
+import json
 import math
 import os
 import re
@@ -73,12 +74,43 @@ def download_report(report):
 
 
 class BrowserTools(TaskTools):
-    def __init__(self, store, timezone):
+    def __init__(self, store, timezone, activity=None):
         super().__init__(store, timezone)
         self.downloads = []
+        self.activity = activity if activity is not None else []
 
     def execute(self, name, arguments):
-        result = super().execute(name, arguments)
+        started = time.monotonic()
+        try:
+            parsed = json.loads(arguments)
+        except (ValueError, TypeError):
+            parsed = None
+        event = {"tool": name, "status": "running", "arguments": parsed,
+                 "duration_ms": None, "summary": ""}
+        self.activity.append(event)
+        try:
+            result = super().execute(name, arguments)
+        except Exception:
+            event.update(status="error", summary="Tool execution failed.",
+                         duration_ms=round((time.monotonic() - started) * 1000))
+            raise
+        value = result.get("result")
+        if not result["ok"]:
+            summary = result["error"]
+        elif name == "add_task":
+            summary = f"Task #{value['id']} {'saved' if value['created'] else 'already exists'}."
+        elif name in ("list_tasks", "search_tasks", "list_categories"):
+            summary = f"Returned {len(value)} {'categories' if name == 'list_categories' else 'tasks'}."
+        elif name == "plan_day":
+            summary = f"Planned {len(value['tasks'])} tasks for {value['day']}."
+        elif name == "export_tasks":
+            summary = f"Exported {value['count']} tasks as {value['format'].upper()}."
+        elif name == "undo_last_action":
+            summary = f"Undid {value['action']} for task #{value['task_id']}."
+        else:
+            summary = f"Task #{value['id']} updated."
+        event.update(status="success" if result["ok"] else "error", summary=summary,
+                     duration_ms=round((time.monotonic() - started) * 1000))
         if name == "export_tasks" and result["ok"]:
             self.downloads.append(download_report(result["result"]))
         return result
@@ -90,6 +122,10 @@ class Conversation:
     model: str
     history: list = field(default_factory=list)
     messages: list = field(default_factory=list)
+    activity: list = field(default_factory=list)
+    phase: str = "idle"
+    run_started: float = 0
+    elapsed_ms: int = 0
     lock: Lock = field(default_factory=Lock)
     touched: float = field(default_factory=time.monotonic)
 
@@ -181,6 +217,9 @@ def create_app(db_path=None, agent_factory=None):
                       "overdue": sum(bool(task["deadline"] and task["deadline"] < today()) for task in pending)},
             "preferences": {"provider": current.provider, "model": current.model},
             "messages": current.messages[-40:],
+            "activity": [dict(event) for event in current.activity[-50:]],
+            "run": {"phase": current.phase, "elapsed_ms": round((time.monotonic() - current.run_started) * 1000)
+                    if current.phase == "working" else current.elapsed_ms},
             "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip() not in ("", "put_your_api_key_here")),
             "token": token,
         }
@@ -249,6 +288,9 @@ def create_app(db_path=None, agent_factory=None):
             current.provider, current.model = body.provider, model
             current.history.clear()
             current.messages.clear()
+            current.activity.clear()
+            current.phase = "idle"
+            current.elapsed_ms = 0
         return {"provider": current.provider, "model": current.model}
 
     @app.post("/api/chat/reset")
@@ -257,6 +299,9 @@ def create_app(db_path=None, agent_factory=None):
         with current.lock:
             current.history.clear()
             current.messages.clear()
+            current.activity.clear()
+            current.phase = "idle"
+            current.elapsed_ms = 0
         return {"ok": True}
 
     @app.post("/api/chat")
@@ -267,7 +312,10 @@ def create_app(db_path=None, agent_factory=None):
         if not current.lock.acquire(blocking=False):
             raise HTTPException(409, "TaskMate is still working on your previous message.")
         try:
-            chat_tools = BrowserTools(store, timezone)
+            current.activity = []
+            current.phase = "working"
+            current.run_started = time.monotonic()
+            chat_tools = BrowserTools(store, timezone, current.activity)
             if agent_factory is not None:
                 agent = agent_factory(current.provider, current.model, chat_tools)
                 agent.history = current.history
@@ -289,14 +337,20 @@ def create_app(db_path=None, agent_factory=None):
                     reply = agent.run(body.message)
             current.history = agent.history
             current.messages.extend([{"role": "user", "content": body.message},
-                                     {"role": "assistant", "content": reply, "downloads": chat_tools.downloads}])
+                                     {"role": "assistant", "content": reply, "downloads": chat_tools.downloads,
+                                      "activity": [dict(event) for event in current.activity],
+                                      "elapsed_ms": round((time.monotonic() - current.run_started) * 1000)}])
             current.messages = current.messages[-40:]
-            return {"reply": reply, "downloads": chat_tools.downloads}
+            current.phase = "complete"
+            return {"reply": reply, "downloads": chat_tools.downloads, "activity": current.activity}
         except OllamaError as error:
             raise HTTPException(502, f"{error} Check your tasks before retrying.") from None
         except (APIConnectionError, APIStatusError):
             raise HTTPException(502, "The model request failed. Check the connection, model access, and API billing. Refresh tasks before retrying.") from None
         finally:
+            if current.phase == "working":
+                current.phase = "error"
+            current.elapsed_ms = round((time.monotonic() - current.run_started) * 1000)
             current.touched = time.monotonic()
             current.lock.release()
 

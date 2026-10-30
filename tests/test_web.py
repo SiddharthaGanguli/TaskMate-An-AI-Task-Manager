@@ -44,7 +44,7 @@ class WebTests(unittest.TestCase):
     def test_dashboard_and_packaged_assets_are_served(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Your day, made simple", response.text)
+        self.assertIn("Agent workspace", response.text)
         for name in ("app.js", "styles.css", "icons.svg", "mark.svg"):
             self.assertEqual(self.client.get("/assets/" + name).status_code, 200, name)
         self.assertIn("script-src 'self'", response.headers["content-security-policy"])
@@ -149,9 +149,17 @@ class WebTests(unittest.TestCase):
             state = client.get("/api/state").json()
             self.assertEqual(state["tasks"][0]["title"], "Added through chat")
             self.assertEqual(state["messages"][-1]["content"], "Saved task #1.")
+            self.assertEqual(state["run"]["phase"], "complete")
+            self.assertEqual(state["activity"][0]["tool"], "add_task")
+            self.assertEqual(state["activity"][0]["status"], "success")
+            self.assertGreaterEqual(state["activity"][0]["duration_ms"], 0)
+            self.assertEqual(state["activity"][0]["arguments"]["title"], "Added through chat")
+            self.assertEqual(state["messages"][-1]["activity"], state["activity"])
             client.post("/api/chat/reset", json={}, headers=headers)
             state = client.get("/api/state").json()
             self.assertEqual(state["messages"], [])
+            self.assertEqual(state["activity"], [])
+            self.assertEqual(state["run"]["phase"], "idle")
             self.assertEqual(len(state["tasks"]), 1)
 
     def test_second_chat_request_cannot_overlap_the_first(self):
@@ -171,6 +179,9 @@ class WebTests(unittest.TestCase):
             future = workers.submit(client.post, "/api/chat", json={"message": "First"}, headers=headers)
             try:
                 self.assertTrue(started.wait(timeout=3))
+                running = client.get("/api/state").json()
+                self.assertEqual(running["run"]["phase"], "working")
+                self.assertEqual(running["activity"], [])
                 self.assertEqual(client.post("/api/chat", json={"message": "Second"}, headers=headers).status_code, 409)
             finally:
                 release.set()
@@ -209,8 +220,27 @@ class WebTests(unittest.TestCase):
             response = client.post("/api/chat", json={"message": "Add a task"}, headers=headers)
             self.assertEqual(response.status_code, 502)
             self.assertIn("Check your tasks before retrying", response.json()["detail"])
+            self.assertEqual(client.get("/api/state").json()["run"]["phase"], "error")
         with patch("task_manager.web.httpx.Client", side_effect=httpx.ConnectError("offline")):
             self.assertFalse(self.client.get("/api/models").json()["connected"])
+
+    def test_activity_reports_rejected_tools_without_fake_success(self):
+        class RejectedToolAgent:
+            def __init__(self, provider, model, tools):
+                self.tools = tools
+                self.history = []
+
+            def run(self, message):
+                self.tools.execute("add_task", '{"title":""}')
+                return "The task needs a title."
+
+        app = create_app(Path(self.folder.name) / "rejected.db", agent_factory=RejectedToolAgent)
+        with TestClient(app) as client:
+            headers = {"X-TaskMate-Token": client.get("/api/state").json()["token"]}
+            result = client.post("/api/chat", json={"message": "Add a task"}, headers=headers).json()
+            self.assertEqual(result["activity"][0]["status"], "error")
+            self.assertIn("Title must", result["activity"][0]["summary"])
+            self.assertEqual(client.get("/api/tasks").json(), [])
 
 
 class ExtensionTests(unittest.TestCase):

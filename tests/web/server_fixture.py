@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 
 import uvicorn
 
@@ -16,6 +17,8 @@ class TestAgent:
 
     def run(self, message):
         self.history.append({"role": "user", "content": message})
+        if message == "Take a moment":
+            time.sleep(2.2)
         if message == "Export my tasks":
             self.tools.execute("export_tasks", json.dumps({"file_format": "csv", "status": "all"}))
             return "Your task export is ready."
